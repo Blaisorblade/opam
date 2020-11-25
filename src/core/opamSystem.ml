@@ -381,13 +381,23 @@ let t_resolve_command =
   in
   let check_perms =
     if Sys.win32 then fun f ->
+      OpamConsole.errmsg "check_perms win32 %s\n" f ;
       try (Unix.stat f).Unix.st_kind = Unix.S_REG
       with e -> OpamStd.Exn.fatal e; false
     else fun f ->
       try
+        OpamConsole.errmsg "check_perms non-win %s\n" f ;
         let open Unix in
         let uid = geteuid () in
-        let groups = OpamStd.IntSet.of_list (getegid () :: Array.to_list (getgroups ())) in
+        OpamConsole.errmsg "check_perms uid %d\n" uid ;
+        let gid = getegid () in
+        OpamConsole.errmsg "check_perms gid %d \n" gid ;
+        let groups' = getgroups () in
+        OpamConsole.errmsg "check_perms got groups\n" ;
+        let all_groups = gid :: Array.to_list groups' in
+        OpamConsole.errmsg "check_perms consed groups\n" ;
+        let groups = OpamStd.IntSet.of_list all_groups in
+        OpamConsole.errmsg "check_perms failed \n" ;
         let {st_uid; st_gid; st_perm; _} = stat f in
         let mask =
           if uid = st_uid then
@@ -397,6 +407,7 @@ let t_resolve_command =
           else
             0o001
         in
+        OpamConsole.errmsg "perms: %d: mask %d\n" st_perm mask;
         if (st_perm land mask) <> 0 then
           true
         else
@@ -404,16 +415,21 @@ let t_resolve_command =
           | None -> false
           | Some [] -> true
           | Some gids -> OpamStd.IntSet.(not (is_empty (inter (of_list gids) groups)))
-      with e -> OpamStd.Exn.fatal e; false
+      with e ->
+        OpamConsole.errmsg "check_perms fatal %s\n" (Printexc.to_string e);
+        OpamStd.Exn.fatal e; false
   in
   let resolve ?dir env name =
+    OpamConsole.errmsg "resolve: Command is %S\n" name;
     if not (Filename.is_relative name) then begin
       (* absolute path *)
+      OpamConsole.errmsg "resolve: absolute";
       if not (Sys.file_exists name) then `Not_found
       else if not (check_perms name) then `Denied
       else `Cmd name
     end else if is_external_cmd name then begin
       (* relative path *)
+      OpamConsole.errmsg "resolve: relative external";
       let cmd = match dir with
         | None -> name
         | Some d -> Filename.concat d name
@@ -437,6 +453,8 @@ let t_resolve_command =
         let candidate = Filename.concat path name in
         if Sys.file_exists candidate then Some candidate else None) path
     in
+      OpamConsole.errmsg "resolve: bare\n";
+      OpamConsole.errmsg "resolve: possibles %s\n" (String.concat " " possibles);
     match List.find check_perms possibles with
     | cmdname -> `Cmd cmdname
     | exception Not_found ->
@@ -496,6 +514,8 @@ let make_command
   (* Check that the command doesn't contain whitespaces *)
   if None <> try Some (String.index cmd ' ') with Not_found -> None then
     OpamConsole.warning "Command %S contains space characters" cmd;
+  OpamConsole.errmsg "make_command: Command is %S" cmd;
+
   let full_cmd =
     if resolve_path then t_resolve_command ~env ?dir cmd
     else `Cmd cmd
@@ -518,6 +538,7 @@ let run_process
 
     if OpamStd.String.contains_char cmd ' ' then
       OpamConsole.warning "Command %S contains space characters" cmd;
+    OpamConsole.errmsg "run_process: Command is %S\n" cmd;
 
     match t_resolve_command ~env cmd with
     | `Cmd full_cmd ->
